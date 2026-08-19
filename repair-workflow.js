@@ -105,7 +105,7 @@
     const { data, error } = await s
       .from('payments')
       .insert({
-        shop_id: S.z.shop_id,
+        shop_id: H,
         customer_id: r.customer_id,
         repair_id: r.id,
         amount: amount,
@@ -121,20 +121,6 @@
     S.payments.push(data);
 
     const newPaid = paid + amount;
-
-    if (newPaid >= total) {
-      const { error: statusError } = await s
-        .from('repair_orders')
-        .update({
-          status: 'paid',
-          updated_by: S.z.user.id
-        })
-        .eq('id', id);
-
-      if (!statusError) {
-        r.status = 'paid';
-      }
-    }
 
     app();
 
