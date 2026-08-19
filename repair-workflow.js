@@ -2,7 +2,6 @@
   function money(n) {
     return 'NT$ ' + Number(n || 0).toLocaleString('zh-TW');
   }
-
   function repairStatusText(status) {
     const map = {
       draft: '草稿',
