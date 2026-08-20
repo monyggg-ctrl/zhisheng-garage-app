@@ -354,13 +354,53 @@
     refresh();
   };
 
+
+    function hideLegacyReportCards(){
+    if(S.pg!=='reports') return;
+
+    const search = Array.from(document.querySelectorAll('input'))
+      .find(el => (el.placeholder || '').includes('搜尋日期'));
+
+    if(!search) return;
+
+    const searchBox = search.parentElement;
+    if(!searchBox) return;
+
+    let el = searchBox.nextElementSibling;
+
+    while(el){
+      const text = (el.textContent || '').trim();
+
+      if(text.includes('期間') && text.includes('筆數')){
+        break;
+      }
+
+      const hasRevenue = text.includes('營收');
+      const hasCost = text.includes('成本');
+      const hasProfit = text.includes('毛利');
+
+      if(hasRevenue || hasCost || hasProfit){
+        el.style.display = 'none';
+      }
+
+      el = el.nextElementSibling;
+    }
+  }
+
+  function finalRefresh(){
+    refresh();
+
+    setTimeout(hideLegacyReportCards, 250);
+    setTimeout(hideLegacyReportCards, 600);
+  }
+
   document.addEventListener('change',()=>{
-    if(S.pg==='reports') refresh();
+    if(S.pg==='reports') finalRefresh();
   });
 
   document.addEventListener('input',()=>{
-    if(S.pg==='reports') refresh();
+    if(S.pg==='reports') finalRefresh();
   });
 
-  refresh();
+  finalRefresh();
 })();
