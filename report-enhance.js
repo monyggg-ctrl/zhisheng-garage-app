@@ -5,8 +5,8 @@
     return 'NT$ ' + Number(n || 0).toLocaleString('zh-TW');
   }
 
-  function numberFromText(v) {
-    const m = String(v || '')
+  function num(text) {
+    const m = String(text || '')
       .replace(/,/g, '')
       .match(/-?\d+(?:\.\d+)?/);
 
@@ -23,190 +23,284 @@
     return new Date(s + 'T12:00:00');
   }
 
-  function currentPeriodMode() {
-    const select =
-      Array.from(document.querySelectorAll('select')).find(el =>
-        (el.previousElementSibling?.textContent || '').includes('統計週期') ||
-        (el.parentElement?.textContent || '').includes('統計週期')
-      ) || document.querySelector('select');
+  function findTitle() {
+    return Array.from(
+      document.querySelectorAll('h1,h2,h3')
+    ).find(el =>
+      (el.textContent || '')
+        .trim()
+        .includes('營運報表')
+    );
+  }
 
-    if (!select) return 'month';
+  function periodSelect() {
+    return Array.from(
+      document.querySelectorAll('select')
+    ).find(el => {
+      const parent =
+        el.parentElement?.textContent || '';
+
+      return parent.includes('統計週期');
+    });
+  }
+
+  function currentMode() {
+    const el = periodSelect();
+
+    if (!el) return 'month';
 
     const text = (
-      select.value ||
-      select.options?.[select.selectedIndex]?.text ||
+      el.options?.[el.selectedIndex]?.text ||
+      el.value ||
       ''
-    ).trim().toLowerCase();
+    ).trim();
 
     if (text.includes('日')) return 'day';
     if (text.includes('年')) return 'year';
-    if (text.includes('月')) return 'month';
 
     return 'month';
   }
 
-  function reportAnchor() {
-    const input = Array.from(document.querySelectorAll('input')).find(x =>
-      (x.placeholder || '').includes('搜尋日期')
+  function reportSearchInput() {
+    return Array.from(
+      document.querySelectorAll('input')
+    ).find(el =>
+      (el.placeholder || '')
+        .includes('搜尋日期')
     );
+  }
 
-    const raw = (input?.value || '').trim();
+  function anchorDate() {
+    const raw =
+      (reportSearchInput()?.value || '')
+        .trim();
 
     if (!raw) return new Date();
 
-    if (/^\d{4}-\d{2}-\d{2}$/.test(raw))
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
       return new Date(raw + 'T12:00:00');
+    }
 
-    if (/^\d{4}-\d{2}$/.test(raw))
-      return new Date(raw + '-01T12:00:00');
+    if (/^\d{4}-\d{2}$/.test(raw)) {
+      return new Date(
+        raw + '-01T12:00:00'
+      );
+    }
 
-    if (/^\d{4}$/.test(raw))
-      return new Date(raw + '-01-01T12:00:00');
+    if (/^\d{4}$/.test(raw)) {
+      return new Date(
+        raw + '-01-01T12:00:00'
+      );
+    }
 
     return new Date();
   }
 
-  function inReportPeriod(dateValue) {
-    const d = parseDate(dateValue);
+  function inPeriod(value) {
+    const d = parseDate(value);
+
     if (!d) return false;
 
-    const mode = currentPeriodMode();
-    const ref = reportAnchor();
+    const a = anchorDate();
+    const mode = currentMode();
 
     if (mode === 'day') {
       return (
-        d.getFullYear() === ref.getFullYear() &&
-        d.getMonth() === ref.getMonth() &&
-        d.getDate() === ref.getDate()
+        d.getFullYear() ===
+          a.getFullYear() &&
+        d.getMonth() ===
+          a.getMonth() &&
+        d.getDate() ===
+          a.getDate()
       );
     }
 
     if (mode === 'year') {
-      return d.getFullYear() === ref.getFullYear();
+      return (
+        d.getFullYear() ===
+        a.getFullYear()
+      );
     }
 
     return (
-      d.getFullYear() === ref.getFullYear() &&
-      d.getMonth() === ref.getMonth()
+      d.getFullYear() ===
+        a.getFullYear() &&
+      d.getMonth() ===
+        a.getMonth()
     );
   }
 
-  function findReportTitle() {
-    return Array.from(document.querySelectorAll('h1,h2,h3'))
-      .find(el =>
-        (el.textContent || '').includes('營運報表')
-      );
+  function hasExactLabel(root, label) {
+    return Array.from(
+      root.querySelectorAll('*')
+    ).some(el =>
+      (el.textContent || '')
+        .trim() === label
+    );
   }
 
-  function findOldMetricArea(title) {
-    if (!title) return null;
+  function findOriginalMetrics(title) {
+    const page =
+      title.closest('.r') ||
+      title.parentElement?.parentElement ||
+      document.body;
 
-    let node = title.nextElementSibling;
+    const candidates = Array.from(
+      page.querySelectorAll('div')
+    ).filter(el => {
+      if (
+        el.id === 'reportEnhanceBox' ||
+        el.id === 'reportEnhanceShell' ||
+        el.closest('#reportEnhanceBox')
+      ) {
+        return false;
+      }
 
-    while (node) {
-      const text = (node.textContent || '').trim();
+      return (
+        hasExactLabel(el, '營收') &&
+        hasExactLabel(el, '成本') &&
+        hasExactLabel(el, '毛利') &&
+        hasExactLabel(el, '毛利率')
+      );
+    });
+
+    if (!candidates.length) {
+      return null;
+    }
+
+    return candidates
+      .sort(
+        (a, b) =>
+          a.querySelectorAll('*').length -
+          b.querySelectorAll('*').length
+      )[0];
+  }
+
+  function valueForLabel(root, label) {
+    if (!root) return 0;
+
+    const els = Array.from(
+      root.querySelectorAll('*')
+    );
+
+    const labelEl = els.find(el =>
+      (el.textContent || '')
+        .trim() === label
+    );
+
+    if (!labelEl) return 0;
+
+    const parent =
+      labelEl.parentElement;
+
+    if (parent) {
+      const text =
+        (parent.textContent || '')
+          .replace(label, '');
+
+      const value = num(text);
 
       if (
-        text.includes('營收') &&
-        text.includes('成本') &&
-        text.includes('毛利')
+        value ||
+        text.includes('0')
       ) {
-        return node;
+        return value;
       }
-
-      node = node.nextElementSibling;
     }
 
-    return null;
+    let next =
+      labelEl.nextElementSibling;
+
+    while (next) {
+      const value =
+        num(next.textContent);
+
+      if (
+        value ||
+        (next.textContent || '')
+          .includes('0')
+      ) {
+        return value;
+      }
+
+      next =
+        next.nextElementSibling;
+    }
+
+    return 0;
   }
 
-  function extractBaseMetrics(oldArea) {
-    const result = {
-      revenue: 0,
-      cost: 0,
-      profit: 0,
-      margin: 0
-    };
+  function readBaseMetrics(root) {
+    let revenue =
+      valueForLabel(root, '營收');
 
-    if (!oldArea) return result;
+    let cost =
+      valueForLabel(root, '成本');
 
-    const els = Array.from(oldArea.querySelectorAll('*'));
+    let profit =
+      valueForLabel(root, '毛利');
 
-    function valueAfterLabel(label) {
-      const labelEl = els.find(
-        el => (el.textContent || '').trim() === label
-      );
-
-      if (!labelEl) return 0;
-
-      const direct = labelEl.nextElementSibling;
-
-      if (direct) {
-        const n = numberFromText(direct.textContent);
-
-        if (n || direct.textContent.includes('0')) {
-          return n;
-        }
-      }
-
-      const parentText =
-        labelEl.parentElement?.textContent || '';
-
-      return numberFromText(
-        parentText.replace(label, '')
-      );
-    }
-
-    result.revenue = valueAfterLabel('營收');
-    result.cost = valueAfterLabel('成本');
-    result.profit = valueAfterLabel('毛利');
-    result.margin = valueAfterLabel('毛利率');
+    let margin =
+      valueForLabel(root, '毛利率');
 
     if (
-      !result.profit &&
-      (result.revenue || result.cost)
+      !profit &&
+      (revenue || cost)
     ) {
-      result.profit =
-        result.revenue - result.cost;
+      profit = revenue - cost;
     }
 
     if (
-      !result.margin &&
-      result.revenue > 0
+      !margin &&
+      revenue > 0
     ) {
-      result.margin =
-        result.profit /
-        result.revenue *
+      margin =
+        profit /
+        revenue *
         100;
     }
 
-    return result;
+    return {
+      revenue,
+      cost,
+      profit,
+      margin
+    };
   }
 
-  function paymentMetrics() {
-    const repairs = (S.r || []).filter(r =>
-      inReportPeriod(r.repair_date)
-    );
-
-    const ids = new Set(
-      repairs.map(r => r.id)
-    );
-
-    const collected = (S.fx.payments || [])
-      .filter(p => ids.has(p.repair_id))
-      .reduce(
-        (sum, p) =>
-          sum + Number(p.amount || 0),
-        0
+  function paymentInfo() {
+    const repairs =
+      (S.r || []).filter(r =>
+        inPeriod(r.repair_date)
       );
 
-    const completed = repairs.filter(
-      r => r.status === 'completed'
-    );
+    const repairIds =
+      new Set(
+        repairs.map(r => r.id)
+      );
+
+    const collected =
+      (S.fx.payments || [])
+        .filter(p =>
+          repairIds.has(
+            p.repair_id
+          )
+        )
+        .reduce(
+          (sum, p) =>
+            sum +
+            Number(p.amount || 0),
+          0
+        );
+
+    const completedCount =
+      repairs.filter(r =>
+        r.status === 'completed'
+      ).length;
 
     return {
       collected,
-      completedCount: completed.length
+      completedCount
     };
   }
 
@@ -215,37 +309,54 @@
       document.getElementById(
         'reportEnhanceStyle'
       )
-    ) return;
+    ) {
+      return;
+    }
 
     const style =
       document.createElement('style');
 
-    style.id = 'reportEnhanceStyle';
+    style.id =
+      'reportEnhanceStyle';
 
     style.textContent = `
-      .reportTitleFixed{
-        grid-column:1 / -1 !important;
-        width:100% !important;
-        display:block !important;
-        margin:0 0 12px !important;
-        writing-mode:horizontal-tb !important;
+      #reportEnhanceShell{
+        width:100%!important;
+        display:block!important;
+        grid-column:1 / -1!important;
+        min-width:0!important;
+        margin:0 0 14px!important;
+      }
+
+      #reportEnhanceShell > h1,
+      #reportEnhanceShell > h2,
+      #reportEnhanceShell > h3{
+        width:100%!important;
+        display:block!important;
+        grid-column:1 / -1!important;
+        writing-mode:horizontal-tb!important;
+        text-orientation:mixed!important;
+        margin:0 0 14px!important;
+        padding:0!important;
+        text-align:left!important;
       }
 
       #reportEnhanceBox{
-        grid-column:1 / -1 !important;
-        width:100% !important;
-        min-width:0 !important;
+        width:100%!important;
+        display:block!important;
+        min-width:0!important;
       }
 
       .reportKpiGrid{
+        width:100%;
         display:grid;
         grid-template-columns:
           repeat(2,minmax(0,1fr));
         gap:10px;
-        margin:12px 0;
       }
 
       .reportKpi{
+        min-width:0;
         border:1px solid #e3e5e8;
         border-radius:16px;
         padding:14px;
@@ -255,23 +366,24 @@
       .reportKpi .label{
         font-size:14px;
         color:#555;
-        margin-bottom:4px;
+        margin-bottom:5px;
       }
 
       .reportKpi .value{
-        font-size:22px;
+        font-size:21px;
         font-weight:800;
         line-height:1.2;
-      }
-
-      .reportKpi.receivable{
-        background:#fff7ed;
-        border-color:#f6d2aa;
+        word-break:keep-all;
       }
 
       .reportKpi.collected{
         background:#eefaf3;
         border-color:#cbead7;
+      }
+
+      .reportKpi.receivable{
+        background:#fff7ed;
+        border-color:#f3c98e;
       }
 
       .reportKpi.profit{
@@ -280,6 +392,7 @@
       }
 
       .reportSummaryBox{
+        width:100%;
         margin-top:12px;
         border:1px solid #e3e5e8;
         border-radius:16px;
@@ -290,6 +403,7 @@
       .reportSummaryRow{
         display:flex;
         justify-content:space-between;
+        align-items:center;
         gap:12px;
         padding:6px 0;
       }
@@ -299,16 +413,15 @@
       }
 
       .reportHint{
-        margin-top:8px;
-        font-size:12px;
+        margin-top:9px;
         color:#777;
-        line-height:1.5;
+        font-size:12px;
+        line-height:1.55;
       }
 
       @media(max-width:600px){
-        .reportKpiGrid{
-          grid-template-columns:
-            repeat(2,minmax(0,1fr));
+        #reportEnhanceShell{
+          padding:0!important;
         }
 
         .reportKpi{
@@ -321,65 +434,98 @@
       }
     `;
 
-    document.head.appendChild(style);
+    document.head.appendChild(
+      style
+    );
   }
 
-  function renderEnhancedReport() {
-    if (S.pg !== 'reports') return;
-
-    const title = findReportTitle();
-    if (!title) return;
-
-    title.classList.add(
-      'reportTitleFixed'
-    );
-
-    const oldArea =
-      findOldMetricArea(title);
-
-    const base =
-      extractBaseMetrics(oldArea);
-
-    const pay =
-      paymentMetrics();
-
-    const revenue = base.revenue;
-    const cost = base.cost;
-    const profit = base.profit;
-    const margin = base.margin;
-
-    const collected = pay.collected;
-
-    const receivable = Math.max(
-      revenue - collected,
-      0
-    );
-
-    let box =
+  function buildShell(title) {
+    let shell =
       document.getElementById(
-        'reportEnhanceBox'
+        'reportEnhanceShell'
       );
 
-    if (!box) {
-      box =
-        document.createElement('div');
-
-      box.id = 'reportEnhanceBox';
-
-      if (oldArea) {
-        oldArea.insertAdjacentElement(
-          'beforebegin',
-          box
-        );
-
-        oldArea.style.display = 'none';
-      } else {
-        title.insertAdjacentElement(
-          'afterend',
-          box
-        );
-      }
+    if (shell) {
+      return shell;
     }
+
+    shell =
+      document.createElement('div');
+
+    shell.id =
+      'reportEnhanceShell';
+
+    const parent =
+      title.parentElement;
+
+    parent.insertBefore(
+      shell,
+      title
+    );
+
+    shell.appendChild(title);
+
+    const box =
+      document.createElement('div');
+
+    box.id =
+      'reportEnhanceBox';
+
+    shell.appendChild(box);
+
+    return shell;
+  }
+
+  function render() {
+    if (S.pg !== 'reports') {
+      return;
+    }
+
+    const title = findTitle();
+
+    if (!title) {
+      return;
+    }
+
+    /*
+      先讀原本報表，
+      再建立新版區塊。
+      這樣不會抓到自己。
+    */
+    const oldMetrics =
+      findOriginalMetrics(title);
+
+    if (!oldMetrics) {
+      return;
+    }
+
+    const base =
+      readBaseMetrics(
+        oldMetrics
+      );
+
+    const payments =
+      paymentInfo();
+
+    const revenue =
+      base.revenue;
+
+    const collected =
+      payments.collected;
+
+    const receivable =
+      Math.max(
+        revenue - collected,
+        0
+      );
+
+    const shell =
+      buildShell(title);
+
+    const box =
+      shell.querySelector(
+        '#reportEnhanceBox'
+      );
 
     box.innerHTML = `
       <div class="reportKpiGrid">
@@ -389,7 +535,7 @@
             營收
           </div>
           <div class="value">
-            ${money(revenue)}
+            ${money(base.revenue)}
           </div>
         </div>
 
@@ -416,7 +562,7 @@
             成本
           </div>
           <div class="value">
-            ${money(cost)}
+            ${money(base.cost)}
           </div>
         </div>
 
@@ -425,7 +571,7 @@
             毛利
           </div>
           <div class="value">
-            ${money(profit)}
+            ${money(base.profit)}
           </div>
         </div>
 
@@ -435,7 +581,7 @@
           </div>
           <div class="value">
             ${Number(
-              margin || 0
+              base.margin || 0
             ).toFixed(1)}%
           </div>
         </div>
@@ -449,7 +595,7 @@
             已完工維修單
           </span>
           <strong>
-            ${pay.completedCount} 筆
+            ${payments.completedCount} 筆
           </strong>
         </div>
 
@@ -488,25 +634,35 @@
         </div>
 
         <div class="reportHint">
-          營收、成本、毛利沿用原營運報表計算；
-          實收＝實際收款紀錄；
+          營收、成本、毛利沿用原營運報表；
+          實收為實際收款紀錄；
           應收帳款＝營收－實收。
         </div>
 
       </div>
     `;
+
+    /*
+      原本四格統計仍保留在 DOM，
+      只把它隱藏。
+      這樣它仍能持續計算，
+      新版才能安全讀取數字。
+    */
+    oldMetrics.style.display =
+      'none';
   }
 
   function refresh() {
     addStyle();
 
     setTimeout(
-      renderEnhancedReport,
-      80
+      render,
+      120
     );
   }
 
-  const originalApp = window.app;
+  const originalApp =
+    window.app;
 
   window.app = function () {
     originalApp();
@@ -518,8 +674,8 @@
     function () {
       if (S.pg === 'reports') {
         setTimeout(
-          renderEnhancedReport,
-          80
+          render,
+          120
         );
       }
     }
@@ -530,8 +686,8 @@
     function () {
       if (S.pg === 'reports') {
         setTimeout(
-          renderEnhancedReport,
-          80
+          render,
+          120
         );
       }
     }
