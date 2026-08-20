@@ -5,6 +5,14 @@
     return 'NT$ ' + Number(n || 0).toLocaleString('zh-TW');
   }
 
+  function numberFromText(v) {
+    const m = String(v || '')
+      .replace(/,/g, '')
+      .match(/-?\d+(?:\.\d+)?/);
+
+    return m ? Number(m[0]) : 0;
+  }
+
   function ymd(v) {
     return String(v || '').slice(0, 10);
   }
@@ -16,12 +24,19 @@
   }
 
   function currentPeriodMode() {
-    const select = document.querySelector('select');
+    const select =
+      Array.from(document.querySelectorAll('select')).find(el =>
+        (el.previousElementSibling?.textContent || '').includes('統計週期') ||
+        (el.parentElement?.textContent || '').includes('統計週期')
+      ) || document.querySelector('select');
+
     if (!select) return 'month';
 
-    const text = (select.value || select.options?.[select.selectedIndex]?.text || '')
-      .trim()
-      .toLowerCase();
+    const text = (
+      select.value ||
+      select.options?.[select.selectedIndex]?.text ||
+      ''
+    ).trim().toLowerCase();
 
     if (text.includes('日')) return 'day';
     if (text.includes('年')) return 'year';
@@ -39,17 +54,14 @@
 
     if (!raw) return new Date();
 
-    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw))
       return new Date(raw + 'T12:00:00');
-    }
 
-    if (/^\d{4}-\d{2}$/.test(raw)) {
+    if (/^\d{4}-\d{2}$/.test(raw))
       return new Date(raw + '-01T12:00:00');
-    }
 
-    if (/^\d{4}$/.test(raw)) {
+    if (/^\d{4}$/.test(raw))
       return new Date(raw + '-01-01T12:00:00');
-    }
 
     return new Date();
   }
@@ -79,81 +91,156 @@
     );
   }
 
-  function paidTotalForRepair(repairId) {
-    return (S.fx.payments || [])
-      .filter(x => x.repair_id === repairId)
-      .reduce((sum, x) => sum + Number(x.amount || 0), 0);
+  function findReportTitle() {
+    return Array.from(document.querySelectorAll('h1,h2,h3'))
+      .find(el =>
+        (el.textContent || '').includes('營運報表')
+      );
   }
 
-  function repairCost(r) {
-    const itemCost = Number(
-      r.internal_parts_cost ??
-      r.parts_cost ??
-      r.part_cost ??
-      r.cost_parts ??
-      0
-    );
+  function findOldMetricArea(title) {
+    if (!title) return null;
 
-    const laborCost = Number(
-      r.internal_labor_cost ??
-      r.labor_cost ??
-      r.cost_labor ??
-      0
-    );
+    let node = title.nextElementSibling;
 
-    return itemCost + laborCost;
+    while (node) {
+      const text = (node.textContent || '').trim();
+
+      if (
+        text.includes('營收') &&
+        text.includes('成本') &&
+        text.includes('毛利')
+      ) {
+        return node;
+      }
+
+      node = node.nextElementSibling;
+    }
+
+    return null;
   }
 
-  function metrics() {
+  function extractBaseMetrics(oldArea) {
+    const result = {
+      revenue: 0,
+      cost: 0,
+      profit: 0,
+      margin: 0
+    };
+
+    if (!oldArea) return result;
+
+    const els = Array.from(oldArea.querySelectorAll('*'));
+
+    function valueAfterLabel(label) {
+      const labelEl = els.find(
+        el => (el.textContent || '').trim() === label
+      );
+
+      if (!labelEl) return 0;
+
+      const direct = labelEl.nextElementSibling;
+
+      if (direct) {
+        const n = numberFromText(direct.textContent);
+
+        if (n || direct.textContent.includes('0')) {
+          return n;
+        }
+      }
+
+      const parentText =
+        labelEl.parentElement?.textContent || '';
+
+      return numberFromText(
+        parentText.replace(label, '')
+      );
+    }
+
+    result.revenue = valueAfterLabel('營收');
+    result.cost = valueAfterLabel('成本');
+    result.profit = valueAfterLabel('毛利');
+    result.margin = valueAfterLabel('毛利率');
+
+    if (
+      !result.profit &&
+      (result.revenue || result.cost)
+    ) {
+      result.profit =
+        result.revenue - result.cost;
+    }
+
+    if (
+      !result.margin &&
+      result.revenue > 0
+    ) {
+      result.margin =
+        result.profit /
+        result.revenue *
+        100;
+    }
+
+    return result;
+  }
+
+  function paymentMetrics() {
     const repairs = (S.r || []).filter(r =>
-      r.status === 'completed' &&
       inReportPeriod(r.repair_date)
     );
 
-    const revenue = repairs.reduce(
-      (sum, r) => sum + Number(r.total || 0),
-      0
+    const ids = new Set(
+      repairs.map(r => r.id)
     );
 
-    const collected = repairs.reduce(
-      (sum, r) => sum + paidTotalForRepair(r.id),
-      0
+    const collected = (S.fx.payments || [])
+      .filter(p => ids.has(p.repair_id))
+      .reduce(
+        (sum, p) =>
+          sum + Number(p.amount || 0),
+        0
+      );
+
+    const completed = repairs.filter(
+      r => r.status === 'completed'
     );
-
-    const receivable = Math.max(revenue - collected, 0);
-
-    const cost = repairs.reduce(
-      (sum, r) => sum + repairCost(r),
-      0
-    );
-
-    const profit = revenue - cost;
-
-    const margin = revenue > 0
-      ? (profit / revenue) * 100
-      : 0;
 
     return {
-      repairs,
-      revenue,
       collected,
-      receivable,
-      cost,
-      profit,
-      margin
+      completedCount: completed.length
     };
   }
 
   function addStyle() {
-    if (document.getElementById('reportEnhanceStyle')) return;
+    if (
+      document.getElementById(
+        'reportEnhanceStyle'
+      )
+    ) return;
 
-    const style = document.createElement('style');
+    const style =
+      document.createElement('style');
+
     style.id = 'reportEnhanceStyle';
 
     style.textContent = `
+      .reportTitleFixed{
+        grid-column:1 / -1 !important;
+        width:100% !important;
+        display:block !important;
+        margin:0 0 12px !important;
+        writing-mode:horizontal-tb !important;
+      }
+
+      #reportEnhanceBox{
+        grid-column:1 / -1 !important;
+        width:100% !important;
+        min-width:0 !important;
+      }
+
       .reportKpiGrid{
         display:grid;
-        grid-template-columns:repeat(2,minmax(0,1fr));
+        grid-template-columns:
+          repeat(2,minmax(0,1fr));
         gap:10px;
         margin:12px 0;
       }
@@ -220,7 +307,8 @@
 
       @media(max-width:600px){
         .reportKpiGrid{
-          grid-template-columns:repeat(2,minmax(0,1fr));
+          grid-template-columns:
+            repeat(2,minmax(0,1fr));
         }
 
         .reportKpi{
@@ -236,117 +324,175 @@
     document.head.appendChild(style);
   }
 
-  function findReportTitle() {
-    return Array.from(document.querySelectorAll('h1,h2,h3'))
-      .find(el => (el.textContent || '').includes('營運報表'));
-  }
-
-  function findOldMetricArea(title) {
-    if (!title) return null;
-
-    let node = title.nextElementSibling;
-
-    while (node) {
-      const text = (node.textContent || '').trim();
-
-      if (
-        text.includes('營收') &&
-        text.includes('成本') &&
-        text.includes('毛利')
-      ) {
-        return node;
-      }
-
-      node = node.nextElementSibling;
-    }
-
-    return null;
-  }
-
   function renderEnhancedReport() {
     if (S.pg !== 'reports') return;
 
     const title = findReportTitle();
     if (!title) return;
 
-    const m = metrics();
+    title.classList.add(
+      'reportTitleFixed'
+    );
 
-    let box = document.getElementById('reportEnhanceBox');
+    const oldArea =
+      findOldMetricArea(title);
+
+    const base =
+      extractBaseMetrics(oldArea);
+
+    const pay =
+      paymentMetrics();
+
+    const revenue = base.revenue;
+    const cost = base.cost;
+    const profit = base.profit;
+    const margin = base.margin;
+
+    const collected = pay.collected;
+
+    const receivable = Math.max(
+      revenue - collected,
+      0
+    );
+
+    let box =
+      document.getElementById(
+        'reportEnhanceBox'
+      );
 
     if (!box) {
-      box = document.createElement('div');
+      box =
+        document.createElement('div');
+
       box.id = 'reportEnhanceBox';
 
-      const oldArea = findOldMetricArea(title);
-
       if (oldArea) {
+        oldArea.insertAdjacentElement(
+          'beforebegin',
+          box
+        );
+
         oldArea.style.display = 'none';
-        oldArea.insertAdjacentElement('beforebegin', box);
       } else {
-        title.insertAdjacentElement('afterend', box);
+        title.insertAdjacentElement(
+          'afterend',
+          box
+        );
       }
     }
 
     box.innerHTML = `
       <div class="reportKpiGrid">
+
         <div class="reportKpi">
-          <div class="label">營收</div>
-          <div class="value">${money(m.revenue)}</div>
+          <div class="label">
+            營收
+          </div>
+          <div class="value">
+            ${money(revenue)}
+          </div>
         </div>
 
         <div class="reportKpi collected">
-          <div class="label">實收</div>
-          <div class="value">${money(m.collected)}</div>
+          <div class="label">
+            實收
+          </div>
+          <div class="value">
+            ${money(collected)}
+          </div>
         </div>
 
         <div class="reportKpi receivable">
-          <div class="label">應收帳款</div>
-          <div class="value">${money(m.receivable)}</div>
+          <div class="label">
+            應收帳款
+          </div>
+          <div class="value">
+            ${money(receivable)}
+          </div>
         </div>
 
         <div class="reportKpi">
-          <div class="label">成本</div>
-          <div class="value">${money(m.cost)}</div>
+          <div class="label">
+            成本
+          </div>
+          <div class="value">
+            ${money(cost)}
+          </div>
         </div>
 
         <div class="reportKpi profit">
-          <div class="label">毛利</div>
-          <div class="value">${money(m.profit)}</div>
+          <div class="label">
+            毛利
+          </div>
+          <div class="value">
+            ${money(profit)}
+          </div>
         </div>
 
         <div class="reportKpi">
-          <div class="label">毛利率</div>
-          <div class="value">${m.margin.toFixed(1)}%</div>
+          <div class="label">
+            毛利率
+          </div>
+          <div class="value">
+            ${Number(
+              margin || 0
+            ).toFixed(1)}%
+          </div>
         </div>
+
       </div>
 
       <div class="reportSummaryBox">
+
         <div class="reportSummaryRow">
-          <span>已完工維修單</span>
-          <strong>${m.repairs.length} 筆</strong>
+          <span>
+            已完工維修單
+          </span>
+          <strong>
+            ${pay.completedCount} 筆
+          </strong>
         </div>
 
         <div class="reportSummaryRow">
-          <span>已收比例</span>
-          <strong>${
-            m.revenue > 0
-              ? ((m.collected / m.revenue) * 100).toFixed(1)
-              : '0.0'
-          }%</strong>
+          <span>
+            已收比例
+          </span>
+          <strong>
+            ${
+              revenue > 0
+                ? (
+                    collected /
+                    revenue *
+                    100
+                  ).toFixed(1)
+                : '0.0'
+            }%
+          </strong>
         </div>
 
         <div class="reportSummaryRow">
-          <span>未收比例</span>
-          <strong>${
-            m.revenue > 0
-              ? ((m.receivable / m.revenue) * 100).toFixed(1)
-              : '0.0'
-          }%</strong>
+          <span>
+            未收比例
+          </span>
+          <strong>
+            ${
+              revenue > 0
+                ? (
+                    receivable /
+                    revenue *
+                    100
+                  ).toFixed(1)
+                : '0.0'
+            }%
+          </strong>
         </div>
 
         <div class="reportHint">
-          營收＝已完工維修單總額；實收＝實際收款紀錄；應收帳款＝營收－實收。
+          營收、成本、毛利沿用原營運報表計算；
+          實收＝實際收款紀錄；
+          應收帳款＝營收－實收。
         </div>
+
       </div>
     `;
   }
@@ -354,9 +500,10 @@
   function refresh() {
     addStyle();
 
-    setTimeout(() => {
-      renderEnhancedReport();
-    }, 50);
+    setTimeout(
+      renderEnhancedReport,
+      80
+    );
   }
 
   const originalApp = window.app;
@@ -366,17 +513,29 @@
     refresh();
   };
 
-  document.addEventListener('change', function () {
-    if (S.pg === 'reports') {
-      setTimeout(renderEnhancedReport, 30);
+  document.addEventListener(
+    'change',
+    function () {
+      if (S.pg === 'reports') {
+        setTimeout(
+          renderEnhancedReport,
+          80
+        );
+      }
     }
-  });
+  );
 
-  document.addEventListener('input', function () {
-    if (S.pg === 'reports') {
-      setTimeout(renderEnhancedReport, 30);
+  document.addEventListener(
+    'input',
+    function () {
+      if (S.pg === 'reports') {
+        setTimeout(
+          renderEnhancedReport,
+          80
+        );
+      }
     }
-  });
+  );
 
   refresh();
 })();
